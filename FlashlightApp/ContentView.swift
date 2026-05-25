@@ -104,7 +104,7 @@ struct ContentView: View {
                     .overlay(alignment: .center) {
                         // Glow near button
                         if cam.isTorchOn || cam.isRecording {
-                            Circle().fill(.yellow.opacity(0.12)).frame(120).blur(radius: 16)
+                            Circle().fill(.yellow.opacity(0.12)).frame(width: 120, height: 120).blur(radius: 16)
                         }
 
                         Button(action: handlePowerTap) {
