@@ -19,6 +19,10 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Fix project format for Xcode 15
+        run: |
+          sed -i '' 's/objectVersion = [0-9][0-9]*/objectVersion = 54/' FlashlightApp.xcodeproj/project.pbxproj
+
       - name: Build .app
         run: |
           xcodebuild build \
