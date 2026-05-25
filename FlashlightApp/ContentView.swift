@@ -100,15 +100,15 @@ struct ContentView: View {
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06), lineWidth: 1))
                     .overlay(alignment: .center) {
                         if cam.isTorchOn || cam.isRecording {
-                            Circle().fill(.yellow.opacity(0.1)).frame(110).blur(radius: 14)
+                            Circle().fill(.yellow.opacity(0.1)).frame(width: 110, height: 110).blur(radius: 14)
                         }
                         Button(action: handleTap) {
                             ZStack {
-                                Circle().fill(Color(white: 0.2)).frame(72)
+                                Circle().fill(Color(white: 0.2)).frame(width: 72, height: 72)
                                 Circle().fill(cam.isRecording ? .red :
                                               cam.isTorchOn ? Color(red: 1, green: 0.85, blue: 0.2) : Color(white: 0.35))
-                                    .frame(64)
-                                Circle().stroke(.white.opacity(0.2), lineWidth: 1).frame(72)
+                                    .frame(width: 64, height: 64)
+                                Circle().stroke(.white.opacity(0.2), lineWidth: 1).frame(width: 72, height: 72)
                                 Image(systemName: cam.isRecording ? "stop.fill" : "flashlight.on.fill")
                                     .font(.title2).foregroundStyle(.white)
                             }
