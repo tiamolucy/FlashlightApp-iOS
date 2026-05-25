@@ -1,5 +1,5 @@
 param(
-    [string]$Owner = "YOUR_USERNAME",
+    [string]$Owner = "tiamolucy",
     [string]$Repo = "FlashlightApp-iOS"
 )
 
