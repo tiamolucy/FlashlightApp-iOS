@@ -149,12 +149,10 @@ struct ContentView: View {
     }
 
     private var statusText: String {
-        if cam.isRecording {
-            String(format: "%02.0f:%02.0f", cam.recordingDuration / 60,
-                   cam.recordingDuration.truncatingRemainder(dividingBy: 60))
-        } else if unlockStage == 1 { return "已解锁，继续点击开关" }
-        else if !cam.isReady { return "相机初始化中" }
-        else { return "点头部开手电 · 按开关录像" }
+        if cam.isRecording { return String(format: "%02.0f:%02.0f", cam.recordingDuration / 60, cam.recordingDuration.truncatingRemainder(dividingBy: 60)) }
+        if unlockStage == 1 { return "已解锁，继续点击开关" }
+        if !cam.isReady { return "相机初始化中" }
+        return "点头部开手电 · 按开关录像"
     }
 
     private func handleTap() {
