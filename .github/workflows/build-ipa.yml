@@ -1,0 +1,43 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build .app
+        run: |
+          xcodebuild build \
+            -project FlashlightApp.xcodeproj \
+            -scheme FlashlightApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/derived \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -r "build/derived/Build/Products/Release-iphoneos/FlashlightApp.app" Payload/
+          zip -r FlashlightApp.ipa Payload/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlashlightApp-ipa
+          path: FlashlightApp.ipa
