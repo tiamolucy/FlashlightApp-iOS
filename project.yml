@@ -18,3 +18,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.flashlightapp.ios
         INFOPLIST_FILE: FlashlightApp/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
