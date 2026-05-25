@@ -25,7 +25,7 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 24)
                     .fill(Color(white: unlockStage == 1 ? 0.25 : 0.2))
                     .frame(width: 180, height: 80)
-                    .overlay(Circle().fill(.white.opacity(0.2)).frame(20).offset(y: -16))
+                    .overlay(Circle().fill(.white.opacity(0.2)).frame(width: 20, height: 20).offset(y: -16))
                     .overlay(unlockStage == 1 ? RoundedRectangle(cornerRadius: 24).stroke(.purple.opacity(0.5), lineWidth: 2) : nil)
                     .onTapGesture {
                         if unlockStage == 0 {
@@ -44,11 +44,11 @@ struct ContentView: View {
                     .frame(width: 170, height: 300)
                     .overlay(alignment: .center) {
                         if cam.isTorchOn || cam.isRecording {
-                            Circle().fill(.yellow.opacity(0.15)).frame(130).blur(radius: 20)
+                            Circle().fill(.yellow.opacity(0.15)).frame(width: 130, height: 130).blur(radius: 20)
                         }
                         Circle()
                             .fill(cam.isRecording ? .red : (cam.isTorchOn ? .yellow : Color(white: 0.25)))
-                            .frame(90)
+                            .frame(width: 90, height: 90)
                             .overlay(
                                 Image(systemName: cam.isRecording ? "stop.fill" : "flashlight.on.fill")
                                     .font(.title2).foregroundStyle(.white)
