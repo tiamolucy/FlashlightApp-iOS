@@ -45,7 +45,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func toggleTorch() {
-        guard let d = device, d.hasTorch else { return }
+        guard let d = device, d.hasTorch, !isRecording else { return }
         try? d.lockForConfiguration()
         d.torchMode = isTorchOn ? .off : .on
         d.unlockForConfiguration()
@@ -75,8 +75,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func stopRecording() {
-        timer?.invalidate()
-        timer = nil
+        timer?.invalidate(); timer = nil
         movieOutput?.stopRecording()
         setTorch(false)
         isRecording = false
