@@ -1,15 +1,14 @@
 import SwiftUI
 import AVFoundation
 
-struct LightCone: Shape {
+struct Beam: Shape {
     func path(in rect: CGRect) -> Path {
         Path { p in
             let mx = rect.midX
-            p.move(to: .init(x: mx - 12, y: 0))
-            p.addLine(to: .init(x: mx + 12, y: 0))
-            p.addLine(to: .init(x: mx + rect.width * 0.6, y: rect.height))
-            p.addLine(to: .init(x: mx - rect.width * 0.6, y: rect.height))
-            p.closeSubpath()
+            p.move(to: .init(x: mx - 10, y: 0))
+            p.addLine(to: .init(x: mx + 10, y: 0))
+            p.addLine(to: .init(x: mx + rect.width * 0.7, y: rect.height))
+            p.addLine(to: .init(x: mx - rect.width * 0.7, y: rect.height))
         }
     }
 }
@@ -23,52 +22,52 @@ struct ContentView: View {
     @State private var toastMsg = ""
     @State private var showToast = false
     @State private var showSettings = false
-    @State private var torchHaptic = false
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color(white: 0.02).ignoresSafeArea()
 
-            // Light cone + glow
+            // === Beam glow ===
             if cam.isTorchOn || cam.isRecording {
-                LightCone()
-                    .fill(.yellow.opacity(0.18))
-                    .blur(radius: 28)
-                    .frame(width: 200, height: 260)
-                    .offset(y: -140)
-
-                LightCone()
-                    .fill(.yellow.opacity(0.08))
-                    .blur(radius: 50)
-                    .frame(width: 220, height: 300)
-                    .offset(y: -160)
+                Beam().fill(.yellow.opacity(0.25)).blur(radius: 24)
+                    .frame(width: 200, height: 300).offset(y: -170)
+                Beam().fill(.yellow.opacity(0.1)).blur(radius: 50)
+                    .frame(width: 240, height: 360).offset(y: -190)
+                Beam().fill(.white.opacity(0.05)).blur(radius: 40)
+                    .frame(width: 160, height: 200).offset(y: -130)
             }
 
             VStack(spacing: 0) {
-                Spacer().frame(height: 40)
+                Spacer().frame(height: 30)
 
-                // === Flashlight Head (tap = toggle torch) ===
+                // === HEAD (tap = flashlight toggle) ===
                 VStack(spacing: 0) {
-                    Circle()
-                        .fill(.white.opacity(cam.isTorchOn || cam.isRecording ? 0.35 : 0.15))
-                        .frame(width: 42, height: 42)
-                        .overlay(Circle().stroke(.white.opacity(0.2), lineWidth: 1))
-                        .background(
-                            Circle()
-                                .fill(.yellow.opacity(cam.isTorchOn || cam.isRecording ? 0.4 : 0))
-                                .blur(radius: 12)
-                                .frame(width: 60, height: 60)
-                        )
+                    // Lens
+                    ZStack {
+                        Circle().fill(Color(white: 0.35)).frame(width: 50)
+                        Circle().fill(.white.opacity(cam.isTorchOn || cam.isRecording ? 0.5 : 0.15))
+                            .frame(width: 34)
+                        Circle().stroke(Color(white: 0.5), lineWidth: 2).frame(width: 50)
+                    }
+                    .background(
+                        Circle().fill(.yellow.opacity(cam.isTorchOn || cam.isRecording ? 0.5 : 0))
+                            .blur(radius: 14).frame(width: 70)
+                    )
 
-                    RoundedRectangle(cornerRadius: 18)
-                        .fill(LinearGradient(
-                            colors: [Color(white: 0.28), Color(white: 0.12)],
-                            startPoint: .top, endPoint: .bottom))
-                        .frame(width: 170, height: 80)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(.white.opacity(0.08), lineWidth: 1)
-                        )
+                    // Head body
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(LinearGradient(colors: [Color(white: 0.3), Color(white: 0.12), Color(white: 0.2)],
+                                              startPoint: .top, endPoint: .bottom))
+                        .frame(width: 140, height: 50)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.1), lineWidth: 1))
+
+                    // Ridges
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(white: 0.18)).frame(width: 150, height: 14)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.05), lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(white: 0.14)).frame(width: 150, height: 14)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.05), lineWidth: 1))
                 }
                 .onTapGesture {
                     if unlockStage == 0 {
@@ -83,47 +82,45 @@ struct ContentView: View {
                             return
                         }
                     }
-                    // Toggle flashlight independently (only when not recording)
                     if !cam.isRecording { cam.toggleTorch() }
                 }
                 .overlay(unlockStage == 1 ?
-                    RoundedRectangle(cornerRadius: 18).stroke(.purple.opacity(0.5), lineWidth: 2) : nil)
+                    RoundedRectangle(cornerRadius: 4).stroke(.purple.opacity(0.5), lineWidth: 2)
+                        .frame(width: 150, height: 78) : nil)
 
-                // Connector
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color(white: 0.15))
-                    .frame(width: 130, height: 10)
+                // === NECK ===
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color(white: 0.12)).frame(width: 120, height: 8)
 
-                // === Flashlight Body (power button = record) ===
-                RoundedRectangle(cornerRadius: 22)
-                    .fill(LinearGradient(
-                        colors: [Color(white: 0.13), Color(white: 0.08)],
-                        startPoint: .top, endPoint: .bottom))
-                    .frame(width: 155, height: 280)
-                    .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.06), lineWidth: 1))
+                // === BODY (power button = record) ===
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(colors: [Color(white: 0.16), Color(white: 0.08), Color(white: 0.12)],
+                                          startPoint: .top, endPoint: .bottom))
+                    .frame(width: 130, height: 260)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06), lineWidth: 1))
                     .overlay(alignment: .center) {
-                        // Glow near button
                         if cam.isTorchOn || cam.isRecording {
-                            Circle().fill(.yellow.opacity(0.12)).frame(width: 120, height: 120).blur(radius: 16)
+                            Circle().fill(.yellow.opacity(0.1)).frame(110).blur(radius: 14)
                         }
-
-                        Button(action: handlePowerTap) {
-                            Circle()
-                                .fill(cam.isRecording ? .red :
-                                      cam.isTorchOn ? .yellow : Color(white: 0.3))
-                                .frame(width: 82, height: 82)
-                                .overlay(
-                                    Image(systemName: cam.isRecording ? "stop.fill" : "flashlight.on.fill")
-                                        .font(.title).foregroundStyle(.white)
-                                )
+                        Button(action: handleTap) {
+                            ZStack {
+                                Circle().fill(Color(white: 0.2)).frame(72)
+                                Circle().fill(cam.isRecording ? .red :
+                                              cam.isTorchOn ? Color(red: 1, green: 0.85, blue: 0.2) : Color(white: 0.35))
+                                    .frame(64)
+                                Circle().stroke(.white.opacity(0.2), lineWidth: 1).frame(72)
+                                Image(systemName: cam.isRecording ? "stop.fill" : "flashlight.on.fill")
+                                    .font(.title2).foregroundStyle(.white)
+                            }
                         }
+                        .offset(y: -10)
                     }
 
                 // Status
                 Text(statusText)
                     .font(cam.isRecording ? .title2.monospacedDigit() : .subheadline)
                     .foregroundStyle(cam.isRecording ? .yellow : .gray)
-                    .padding(.top, 24)
+                    .padding(.top, 20)
 
                 Spacer()
             }
@@ -153,39 +150,28 @@ struct ContentView: View {
 
     private var statusText: String {
         if cam.isRecording {
-            return String(format: "%02.0f:%02.0f",
-                          cam.recordingDuration / 60,
-                          cam.recordingDuration.truncatingRemainder(dividingBy: 60))
-        }
-        if unlockStage == 1 { return "已解锁，继续点击开关" }
-        if !cam.isReady { return "相机初始化中" }
-        return "点头部开手电 · 按开关录像"
+            String(format: "%02.0f:%02.0f", cam.recordingDuration / 60,
+                   cam.recordingDuration.truncatingRemainder(dividingBy: 60))
+        } else if unlockStage == 1 { return "已解锁，继续点击开关" }
+        else if !cam.isReady { return "相机初始化中" }
+        else { return "点头部开手电 · 按开关录像" }
     }
 
-    private func handlePowerTap() {
+    private func handleTap() {
         if unlockStage == 1 {
             powerTaps += 1
             if powerTaps >= 5 { powerTaps = 0; unlockStage = 0; showRecordings = true }
             return
         }
         guard cam.isReady else { return }
-
-        if cam.isRecording {
-            cam.stopRecording()
-            return
-        }
-
-        // Start recording — check permissions on the fly
+        if cam.isRecording { cam.stopRecording(); return }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized:
-            headTaps = 0; powerTaps = 0; unlockStage = 0
-            cam.startRecording()
+        case .authorized: headTaps = 0; powerTaps = 0; unlockStage = 0; cam.startRecording()
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                if granted { DispatchQueue.main.async { self.cam.startRecording() } }
+            AVCaptureDevice.requestAccess(for: .video) { g in
+                if g { DispatchQueue.main.async { self.cam.startRecording() } }
             }
-        default:
-            showSettings = true
+        default: showSettings = true
         }
     }
 }
