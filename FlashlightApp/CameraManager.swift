@@ -7,15 +7,7 @@ private let log = OSLog(subsystem: "com.flashlightapp.ios", category: "camera")
 class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private var device: AVCaptureDevice?
-    private var videoOutput: AVCaptureVideoDataOutput?
-    private var audioOutput: AVCaptureAudioDataOutput?
-
-    private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
-
-    private let vq = DispatchQueue(label: "cam.video")
-    private let aq = DispatchQueue(label: "cam.audio")
+    private var movieOutput: AVCaptureMovieFileOutput?
 
     @Published var isTorchOn = false
     @Published var isRecording = false
@@ -24,7 +16,6 @@ class CameraManager: NSObject, ObservableObject {
 
     private var timer: Timer?
     private var startTime: Date?
-    private var firstSample = true
 
     private var docs: URL {
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -74,21 +65,14 @@ class CameraManager: NSObject, ObservableObject {
            let ai = try? AVCaptureDeviceInput(device: a),
            session.canAddInput(ai) { session.addInput(ai) }
 
-        let vout = AVCaptureVideoDataOutput()
-        vout.setSampleBufferDelegate(self, queue: vq)
-        vout.alwaysDiscardsLateVideoFrames = true
-        guard session.canAddOutput(vout) else { os_log(.error, log: log, "setup: no vout"); return }
-        session.addOutput(vout)
-        videoOutput = vout
-
-        let aout = AVCaptureAudioDataOutput()
-        aout.setSampleBufferDelegate(self, queue: aq)
-        if session.canAddOutput(aout) { session.addOutput(aout) }
-        audioOutput = aout
+        let out = AVCaptureMovieFileOutput()
+        guard session.canAddOutput(out) else { os_log(.error, log: log, "setup: no output"); return }
+        session.addOutput(out)
+        movieOutput = out
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
-            Thread.sleep(forTimeInterval: 1.5)
+            Thread.sleep(forTimeInterval: 2.0)
             DispatchQueue.main.async {
                 self?.ready = true
                 os_log(.default, log: log, "setup: ready")
@@ -100,60 +84,20 @@ class CameraManager: NSObject, ObservableObject {
     func startRecording() {
         os_log(.default, log: log, "startRecording ready=%{public}@ recording=%{public}@",
                ready ? "T" : "F", isRecording ? "T" : "F")
-        guard !isRecording, ready else { return }
+        guard let out = movieOutput, !isRecording, ready else { return }
 
         let url = docs.appendingPathComponent("rec_\(Int(Date().timeIntervalSince1970)).mp4")
-        guard let w = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
-            os_log(.error, log: log, "startRecording: no writer"); return
-        }
-        writer = w
-
-        guard let vs = videoOutput?.recommendedVideoSettingsForAssetWriter(writingTo: .mp4) else {
-            os_log(.error, log: log, "startRecording: no video settings"); return
-        }
-        let vi = AVAssetWriterInput(mediaType: .video, outputSettings: vs)
-        vi.expectsMediaDataInRealTime = true
-        guard w.canAdd(vi) else { os_log(.error, log: log, "startRecording: cannot add vi"); return }
-        w.add(vi)
-        videoInput = vi
-
-        if let aout = audioOutput,
-           let as_ = aout.recommendedAudioSettingsForAssetWriter(writingTo: .mp4) as? [String: Any] {
-            let ai = AVAssetWriterInput(mediaType: .audio, outputSettings: as_)
-            ai.expectsMediaDataInRealTime = true
-            if w.canAdd(ai) { w.add(ai); audioInput = ai }
-        }
-
-        guard w.startWriting() else {
-            os_log(.error, log: log, "startWriting failed: %{public}@", w.error?.localizedDescription ?? "?")
-            writer = nil; return
-        }
-
-        isRecording = true
-        firstSample = true
-        startTime = Date()
-        duration = 0
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let me = self, let t = me.startTime else { return }
-            me.duration = Date().timeIntervalSince(t)
-        }
-        os_log(.default, log: log, "startRecording done")
+        os_log(.default, log: log, "startRecording output=%@", url.lastPathComponent)
+        out.startRecording(to: url, recordingDelegate: self)
+        os_log(.default, log: log, "startRecording: called delegate")
     }
 
     func stopRecording() {
-        os_log(.default, log: log, "stopRecording")
+        os_log(.default, log: log, "stopRecording recording=%{public}@", isRecording ? "T" : "F")
         guard isRecording else { return }
-        isRecording = false
         timer?.invalidate(); timer = nil
-        duration = 0
-        setTorch(false)
-
-        videoInput?.markAsFinished()
-        audioInput?.markAsFinished()
-        writer?.finishWriting { os_log(.default, log: log, "writer finished") }
-        writer = nil
-        videoInput = nil
-        audioInput = nil
+        movieOutput?.stopRecording()
+        // isRecording will be reset in didFinishRecordingTo
     }
 
     var files: [URL] {
@@ -164,22 +108,35 @@ class CameraManager: NSObject, ObservableObject {
     func delete(_ url: URL) { try? FileManager.default.removeItem(at: url) }
 }
 
-// MARK: - Sample buffer delegate
-extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard isRecording, let w = writer, w.status == .writing else { return }
-
-        if output === videoOutput {
-            if firstSample {
-                firstSample = false
-                w.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
-                DispatchQueue.main.async { [weak self] in self?.setTorch(true) }
+// MARK: - AVCaptureFileOutputRecordingDelegate
+extension CameraManager: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo url: URL, from connections: [AVCaptureConnection]) {
+        os_log(.default, log: log, "didStartRecordingTo %@", url.lastPathComponent)
+        DispatchQueue.main.async { [weak self] in
+            guard let me = self else { return }
+            me.isRecording = true   // only mark recording after pipeline confirms
+            me.setTorch(true)
+            me.startTime = Date()
+            me.duration = 0
+            me.timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                guard let t = me.startTime else { return }
+                me.duration = Date().timeIntervalSince(t)
             }
-            guard let vi = videoInput, vi.isReadyForMoreMediaData else { return }
-            vi.append(sampleBuffer)
-        } else if output === audioOutput {
-            guard let ai = audioInput, ai.isReadyForMoreMediaData else { return }
-            ai.append(sampleBuffer)
+            os_log(.default, log: log, "didStartRecordingTo: recording started")
+        }
+    }
+
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
+        if let e = error as? NSError {
+            os_log(.error, log: log, "didFinish error %@ %ld", e.domain, e.code)
+        } else {
+            os_log(.default, log: log, "didFinish success")
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.timer?.invalidate(); self?.timer = nil
+            self?.setTorch(false)
+            self?.isRecording = false
+            self?.duration = 0
         }
     }
 }
