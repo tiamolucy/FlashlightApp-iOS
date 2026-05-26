@@ -165,15 +165,15 @@ struct ContentView: View {
     }
 
     private var statusText: String {
-        if cam.isRecording { return String(format: "%02.0f:%02.0f", cam.recordingDuration / 60, cam.recordingDuration.truncatingRemainder(dividingBy: 60)) }
+        if cam.isRecording { return String(format: "%02.0f:%02.0f", cam.duration / 60, cam.duration.truncatingRemainder(dividingBy: 60)) }
         if unlockStage == 1 { return "已解锁，继续点击开关" }
-        if !cam.isReady { return "相机初始化中" }
+        if !cam.ready { return "相机初始化中" }
         return "点头部开手电 · 按开关录像"
     }
 
     private func handleTap() {
         os_log(.info, log: log, "POWER tapped: unlockStage=%d powerTaps=%d isRecording=%{public}@ isReady=%{public}@",
-               unlockStage, powerTaps, cam.isRecording ? "true" : "false", cam.isReady ? "true" : "false")
+               unlockStage, powerTaps, cam.isRecording ? "true" : "false", cam.ready ? "true" : "false")
 
         if unlockStage == 1 {
             powerTimer?.cancel()
@@ -185,7 +185,7 @@ struct ContentView: View {
             if powerTaps >= 8 { powerTimer?.cancel(); powerTaps = 0; unlockStage = 0; showRecordings = true; os_log(.info, log: log, "POWER: opening recordings") }
             return
         }
-        guard cam.isReady else { os_log(.error, log: log, "POWER: camera not ready"); return }
+        guard cam.ready else { os_log(.error, log: log, "POWER: camera not ready"); return }
 
         if cam.isRecording {
             os_log(.info, log: log, "POWER: stopping recording")

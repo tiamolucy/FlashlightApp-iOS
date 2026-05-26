@@ -11,10 +11,10 @@ struct RecordingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                if cam.recordings.isEmpty {
+                if cam.files.isEmpty {
                     Text("还没有录像，回到主界面开始录制").foregroundStyle(.gray)
                 }
-                ForEach(cam.recordings, id: \.self) { url in
+                ForEach(cam.files, id: \.self) { url in
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(url.lastPathComponent).font(.subheadline).lineLimit(1)
