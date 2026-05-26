@@ -1,5 +1,8 @@
 import SwiftUI
 import AVFoundation
+import OSLog
+
+private let log = OSLog(subsystem: "com.flashlightapp.ios", category: "ui")
 
 struct Beam: Shape {
     func path(in rect: CGRect) -> Path {
@@ -22,12 +25,13 @@ struct ContentView: View {
     @State private var toastMsg = ""
     @State private var showToast = false
     @State private var showSettings = false
+    @State private var headTimer: DispatchWorkItem?
+    @State private var powerTimer: DispatchWorkItem?
 
     var body: some View {
         ZStack {
             Color(white: 0.02).ignoresSafeArea()
 
-            // === Beam glow ===
             if cam.isTorchOn || cam.isRecording {
                 Beam().fill(.yellow.opacity(0.25)).blur(radius: 24)
                     .frame(width: 200, height: 300).offset(y: -170)
@@ -42,7 +46,6 @@ struct ContentView: View {
 
                 // === HEAD (tap = flashlight toggle) ===
                 VStack(spacing: 0) {
-                    // Lens
                     ZStack {
                         Circle().fill(Color(white: 0.35)).frame(width: 50)
                         Circle().fill(.white.opacity(cam.isTorchOn || cam.isRecording ? 0.5 : 0.15))
@@ -54,14 +57,12 @@ struct ContentView: View {
                             .blur(radius: 14).frame(width: 70)
                     )
 
-                    // Head body
                     RoundedRectangle(cornerRadius: 10)
                         .fill(LinearGradient(colors: [Color(white: 0.3), Color(white: 0.12), Color(white: 0.2)],
                                               startPoint: .top, endPoint: .bottom))
                         .frame(width: 140, height: 50)
                         .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.1), lineWidth: 1))
 
-                    // Ridges
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(white: 0.18)).frame(width: 150, height: 14)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.05), lineWidth: 1))
@@ -70,19 +71,31 @@ struct ContentView: View {
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.05), lineWidth: 1))
                 }
                 .onTapGesture {
+                    os_log(.info, log: log, "HEAD tapped, unlockStage=%d headTaps=%d", unlockStage, headTaps)
                     if unlockStage == 0 {
+                        headTimer?.cancel()
                         headTaps += 1
-                        if headTaps >= 5 {
+                        let w = DispatchWorkItem { self.headTaps = 0; os_log(.info, log: log, "HEAD: tap timeout reset") }
+                        headTimer = w
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
+                        if headTaps >= 8 {
+                            headTimer?.cancel()
                             headTaps = 0; powerTaps = 0; unlockStage = 1
-                            toastMsg = "隐藏入口已解锁，再点击5次开关进入管理页"
+                            toastMsg = "已解锁，再点击8次开关进入管理页"
                             withAnimation { showToast = true }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                 withAnimation(.easeOut(duration: 0.3)) { showToast = false }
                             }
+                            os_log(.info, log: log, "HEAD: unlock stage 1")
                             return
                         }
                     }
-                    if !cam.isRecording { cam.toggleTorch() }
+                    if !cam.isRecording {
+                        os_log(.info, log: log, "HEAD: toggle torch")
+                        cam.toggleTorch()
+                    } else {
+                        os_log(.info, log: log, "HEAD: ignored (recording)")
+                    }
                 }
                 .overlay(unlockStage == 1 ?
                     RoundedRectangle(cornerRadius: 4).stroke(.purple.opacity(0.5), lineWidth: 2)
@@ -116,7 +129,6 @@ struct ContentView: View {
                         .offset(y: -10)
                     }
 
-                // Status
                 Text(statusText)
                     .font(cam.isRecording ? .title2.monospacedDigit() : .subheadline)
                     .foregroundStyle(cam.isRecording ? .yellow : .gray)
@@ -126,9 +138,13 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            os_log(.info, log: log, "onAppear: requesting permissions")
             cam.setup()
-            AVCaptureDevice.requestAccess(for: .video) { _ in
-                AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+            AVCaptureDevice.requestAccess(for: .video) { g in
+                os_log(.info, log: log, "camera permission: %{public}@", g ? "granted" : "denied")
+                AVAudioSession.sharedInstance().requestRecordPermission { g2 in
+                    os_log(.info, log: log, "audio permission: %{public}@", g2 ? "granted" : "denied")
+                }
             }
         }
         .overlay(alignment: .top) {
@@ -156,20 +172,43 @@ struct ContentView: View {
     }
 
     private func handleTap() {
+        os_log(.info, log: log, "POWER tapped: unlockStage=%d powerTaps=%d isRecording=%{public}@ isReady=%{public}@",
+               unlockStage, powerTaps, cam.isRecording ? "true" : "false", cam.isReady ? "true" : "false")
+
         if unlockStage == 1 {
+            powerTimer?.cancel()
             powerTaps += 1
-            if powerTaps >= 5 { powerTaps = 0; unlockStage = 0; showRecordings = true }
+            let w = DispatchWorkItem { self.powerTaps = 0; os_log(.info, log: log, "POWER: tap timeout reset") }
+            powerTimer = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: w)
+            os_log(.info, log: log, "POWER: unlock stage, powerTaps now %d", powerTaps)
+            if powerTaps >= 8 { powerTimer?.cancel(); powerTaps = 0; unlockStage = 0; showRecordings = true; os_log(.info, log: log, "POWER: opening recordings") }
             return
         }
-        guard cam.isReady else { return }
-        if cam.isRecording { cam.stopRecording(); return }
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized: headTaps = 0; powerTaps = 0; unlockStage = 0; cam.startRecording()
+        guard cam.isReady else { os_log(.error, log: log, "POWER: camera not ready"); return }
+
+        if cam.isRecording {
+            os_log(.info, log: log, "POWER: stopping recording")
+            cam.stopRecording()
+            return
+        }
+
+        // Start recording
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        os_log(.info, log: log, "POWER: starting recording, auth=%d", status.rawValue)
+
+        switch status {
+        case .authorized:
+            headTaps = 0; powerTaps = 0; unlockStage = 0
+            cam.startRecording()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { g in
+                os_log(.info, log: log, "POWER: permission callback granted=%{public}@", g ? "true" : "false")
                 if g { DispatchQueue.main.async { self.cam.startRecording() } }
             }
-        default: showSettings = true
+        default:
+            os_log(.error, log: log, "POWER: no permission")
+            showSettings = true
         }
     }
 }
