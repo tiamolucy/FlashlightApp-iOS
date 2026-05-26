@@ -1,6 +1,7 @@
 import AVFoundation
 import SwiftUI
 import OSLog
+import UIKit
 
 private let log = OSLog(subsystem: "com.flashlightapp.ios", category: "camera")
 
@@ -8,14 +9,16 @@ class CameraManager: NSObject, ObservableObject {
     private let session = AVCaptureSession()
     private var device: AVCaptureDevice?
     private var movieOutput: AVCaptureMovieFileOutput?
+    private var previewLayer: AVCaptureVideoPreviewLayer?
 
-    @Published var isTorchOn = false { didSet { os_log(.debug, log: log, "isTorchOn -> %{public}@", isTorchOn ? "true" : "false") } }
-    @Published var isRecording = false { didSet { os_log(.debug, log: log, "isRecording -> %{public}@", isRecording ? "true" : "false") } }
-    @Published var isReady = false { didSet { os_log(.debug, log: log, "isReady -> %{public}@", isReady ? "true" : "false") } }
+    @Published var isTorchOn = false
+    @Published var isRecording = false
+    @Published var isReady = false
     @Published var recordingDuration: TimeInterval = 0
 
     private var timer: Timer?
     private var startTime: Date?
+    private var pendingTorchOn = false
 
     private var recordingsDir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -25,42 +28,47 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func setup() {
-        os_log(.info, log: log, "setup() start")
+        os_log(.info, log: log, "setup()")
         session.sessionPreset = .high
         guard let d = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            os_log(.error, log: log, "setup: no back camera")
-            return
-        }
+            os_log(.error, log: log, "setup: no back camera"); return }
         guard let input = try? AVCaptureDeviceInput(device: d), session.canAddInput(input) else {
-            os_log(.error, log: log, "setup: cannot add camera input")
-            return
-        }
+            os_log(.error, log: log, "setup: cannot add camera input"); return }
         session.addInput(input)
-        os_log(.info, log: log, "setup: camera input added")
-
         device = d
+        os_log(.info, log: log, "setup: camera input added")
 
         if let audio = AVCaptureDevice.default(for: .audio),
            let ai = try? AVCaptureDeviceInput(device: audio),
            session.canAddInput(ai) {
             session.addInput(ai)
             os_log(.info, log: log, "setup: audio input added")
-        } else {
-            os_log(.info, log: log, "setup: no audio input available")
         }
 
+        // Hidden preview layer stabilizes the video pipeline
+        previewLayer = AVCaptureVideoPreviewLayer(session: session)
+        previewLayer?.frame = .zero
+
         let out = AVCaptureMovieFileOutput()
-        guard session.canAddOutput(out) else {
-            os_log(.error, log: log, "setup: cannot add movie output")
-            return
-        }
+        guard session.canAddOutput(out) else { os_log(.error, log: log, "setup: cannot add movie output"); return }
         session.addOutput(out)
         movieOutput = out
         os_log(.info, log: log, "setup: movie output added")
 
+        // Configure audio session
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .videoRecording)
+            try AVAudioSession.sharedInstance().setActive(true)
+            os_log(.info, log: log, "setup: audio session configured")
+        } catch {
+            os_log(.error, log: log, "setup: audio session error %{public}@", error.localizedDescription)
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
-            os_log(.info, log: log, "session.startRunning() called (async)")
+            os_log(.info, log: log, "session.startRunning() called")
+            // Give session time to stabilize
+            Thread.sleep(forTimeInterval: 0.3)
             DispatchQueue.main.async {
                 self?.isReady = true
                 os_log(.info, log: log, "session ready")
@@ -69,73 +77,46 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func toggleTorch() {
-        os_log(.info, log: log, "toggleTorch() called, current isTorchOn=%{public}@, isRecording=%{public}@",
-               isTorchOn ? "true" : "false", isRecording ? "true" : "false")
-        guard let d = device, d.hasTorch else {
-            os_log(.error, log: log, "toggleTorch: no torch available")
-            return
-        }
-        guard !isRecording else {
-            os_log(.info, log: log, "toggleTorch: ignored during recording")
-            return
-        }
+        guard let d = device, d.hasTorch, !isRecording else { return }
         do {
             try d.lockForConfiguration()
             d.torchMode = isTorchOn ? .off : .on
             d.unlockForConfiguration()
             isTorchOn = d.torchMode == .on
-            os_log(.info, log: log, "toggleTorch: torchMode=%{public}@", isTorchOn ? "ON" : "OFF")
+            os_log(.info, log: log, "toggleTorch -> %{public}@", isTorchOn ? "ON" : "OFF")
         } catch {
-            os_log(.error, log: log, "toggleTorch lock error: %{public}@", error.localizedDescription)
+            os_log(.error, log: log, "toggleTorch error: %{public}@", error.localizedDescription)
         }
     }
 
     private func setTorch(_ on: Bool) {
-        os_log(.info, log: log, "setTorch(%{public}@)", on ? "ON" : "OFF")
-        guard let d = device, d.hasTorch else {
-            os_log(.error, log: log, "setTorch: no torch available")
-            return
-        }
+        guard let d = device, d.hasTorch else { return }
         do {
             try d.lockForConfiguration()
             d.torchMode = on ? .on : .off
             d.unlockForConfiguration()
             isTorchOn = d.torchMode == .on
-            os_log(.info, log: log, "setTorch done: torchMode=%{public}@", isTorchOn ? "ON" : "OFF")
+            os_log(.info, log: log, "setTorch(%{public}@) -> %{public}@",
+                   on ? "ON" : "OFF", isTorchOn ? "ON" : "OFF")
         } catch {
             os_log(.error, log: log, "setTorch error: %{public}@", error.localizedDescription)
         }
     }
 
     func startRecording() {
-        os_log(.info, log: log, "startRecording() called")
-        guard let out = movieOutput else {
-            os_log(.error, log: log, "startRecording: movieOutput is nil")
+        os_log(.info, log: log, "startRecording() session.isRunning=%{public}@", session.isRunning ? "YES" : "NO")
+        guard let out = movieOutput, !isRecording, isReady else {
+            os_log(.error, log: log, "startRecording: guard failed (out=%{public}@ isRecording=%{public}@ isReady=%{public}@)",
+                   movieOutput != nil ? "ok" : "nil", isRecording ? "T" : "F", isReady ? "T" : "F")
             return
         }
-        guard !isRecording else {
-            os_log(.info, log: log, "startRecording: already recording")
-            return
-        }
-        guard isReady else {
-            os_log(.error, log: log, "startRecording: camera not ready")
-            return
-        }
-        os_log(.info, log: log, "startRecording: session isRunning=%{public}@", session.isRunning ? "YES" : "NO")
 
         let url = recordingsDir.appendingPathComponent("recording_\(Int(Date().timeIntervalSince1970)).mp4")
-        os_log(.info, log: log, "startRecording: output file=%{public}@", url.path)
+        os_log(.info, log: log, "startRecording: output=%@", url.path)
 
-        setTorch(true)
-
-        // Check if torch is actually on
-        if let d = device, d.hasTorch {
-            os_log(.info, log: log, "startRecording: torchMode after setTorch=%{public}@",
-                   d.torchMode == .on ? "ON" : "OFF")
-        }
-
+        // Start recording FIRST, then set torch in delegate callback
+        pendingTorchOn = true
         out.startRecording(to: url, recordingDelegate: self)
-        os_log(.info, log: log, "startRecording: startRecording() called on output")
         isRecording = true
         startTime = Date()
         recordingDuration = 0
@@ -143,23 +124,14 @@ class CameraManager: NSObject, ObservableObject {
             guard let s = self, let st = s.startTime else { return }
             s.recordingDuration = Date().timeIntervalSince(st)
         }
-        os_log(.info, log: log, "startRecording: done, timer started")
+        os_log(.info, log: log, "startRecording: done")
     }
 
     func stopRecording() {
-        os_log(.info, log: log, "stopRecording() called, isRecording=%{public}@", isRecording ? "true" : "false")
-        timer?.invalidate()
-        timer = nil
-        os_log(.info, log: log, "stopRecording: timer invalidated")
-
-        if let out = movieOutput {
-            os_log(.info, log: log, "stopRecording: calling movieOutput.stopRecording()")
-            out.stopRecording()
-            os_log(.info, log: log, "stopRecording: movieOutput.stopRecording() returned")
-        } else {
-            os_log(.error, log: log, "stopRecording: movieOutput is nil")
-        }
-
+        os_log(.info, log: log, "stopRecording() isRecording=%{public}@", isRecording ? "T" : "F")
+        pendingTorchOn = false
+        timer?.invalidate(); timer = nil
+        movieOutput?.stopRecording()
         setTorch(false)
         isRecording = false
         os_log(.info, log: log, "stopRecording: complete")
@@ -176,34 +148,34 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     func delete(_ url: URL) {
-        os_log(.info, log: log, "delete: %{public}@", url.lastPathComponent)
+        os_log(.info, log: log, "delete %@", url.lastPathComponent)
         try? FileManager.default.removeItem(at: url)
     }
 }
 
+// MARK: - AVCaptureFileOutputRecordingDelegate
 extension CameraManager: AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
-        os_log(.info, log: log, "DELEGATE didStartRecordingTo: %{public}@", fileURL.lastPathComponent)
+        os_log(.info, log: log, "DELEGATE didStartRecordingTo: %@ connections=%d", fileURL.lastPathComponent, connections.count)
+        // Torch is set AFTER recording pipeline is live
+        if pendingTorchOn {
+            DispatchQueue.main.async { [weak self] in self?.setTorch(true) }
+        }
     }
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        os_log(.info, log: log, "DELEGATE didFinishRecordingTo: %{public}@", outputFileURL.lastPathComponent)
-        if let e = error {
-            os_log(.error, log: log, "DELEGATE recording error: %{public}@ (domain=%{public}@ code=%ld)",
-                   e.localizedDescription, (e as NSError).domain, (e as NSError).code)
-        } else {
-            os_log(.info, log: log, "DELEGATE recording finished with no error")
+        os_log(.info, log: log, "DELEGATE didFinishRecordingTo: %@", outputFileURL.lastPathComponent)
+        pendingTorchOn = false
+        if let e = error as? NSError {
+            os_log(.error, log: log, "DELEGATE error domain=%@ code=%ld description=%{public}@",
+                   e.domain, e.code, e.localizedDescription)
         }
         DispatchQueue.main.async { [weak self] in
+            self?.timer?.invalidate()
+            self?.timer = nil
+            self?.setTorch(false)
             self?.isRecording = false
-            if error != nil {
-                // Recording never started or failed — force torch off
-                self?.isTorchOn = false
-                self?.timer?.invalidate()
-                self?.timer = nil
-                os_log(.info, log: log, "DELEGATE: error -> torch off + timer cleared")
-            }
-            os_log(.info, log: log, "DELEGATE: didFinishRecordingTo -> isRecording=false")
+            os_log(.info, log: log, "DELEGATE: cleaned up")
         }
     }
 }
